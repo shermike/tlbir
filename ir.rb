@@ -10,8 +10,13 @@ class Tlb
   def get_type(type_name)
     return Type.new(type_name) if Type::PRIMITIVE_TYPES.include?(type_name)
     type = @types[type_name]
-    raise "Undefined type: #{type}" unless type
+    raise "Undefined type: #{type_name}" unless type
     type
+  end
+
+  def add_type(type_name, type)
+    raise "Type already exists: #{type_name}" if @types.include?(type_name)
+    @types[type_name] = type
   end
 
   def get_or_create_type(type_name)
@@ -26,16 +31,16 @@ class Tlb
     out.write("TLB:\n")
     # @types.each { _2.dump('  ', out) }
     @types.each do |_, type|
-      out.write("  type: #{type.name} #{type.params.map(&:to_s).join(' ')}\n")
+      out.write("  type: #{type.name} #{type.variants[0].params.map(&:to_s).join(' ')}\n")
       type.variants.each do |variant|
         variant.constraints.each do |constraint|
           out.write("    {#{constraint}}")
         end
-        out.write("\n")
+        out.write("\n") unless variant.constraints.empty?
         max_len = variant.fields.map(&:name).max_by(&:size).size
         prefix = '    - '
         variant.fields.each do |field|
-          out.write("#{prefix}#{field.name.ljust(max_len)} : #{field.value}\n")
+          out.write("#{prefix}#{field.name.ljust(max_len)} : #{field}\n")
           prefix = '      '
         end
       end
@@ -43,23 +48,21 @@ class Tlb
   end
 end
 
+########################################################################################################################
+# Type
+#
 class Type
-  attr_reader :name, :variants, :params
+  attr_reader :name, :variants
 
   PRIMITIVE_TYPES = %w[int uint]
 
   def initialize(name)
     @name = name
     @variants = []
-    @params = []
   end
 
   def add_variant(variant)
     @variants << variant
-  end
-
-  def add_param(param)
-    @params << param
   end
 
   def primitive?
@@ -67,16 +70,30 @@ class Type
   end
 
   def [](variant)
-    return @variants.find { _1.name == variant } if @variants.size > 1
-    @variants[0][variant]
+    return @variants[variant] if variant.is_a?(Integer)
+    @variants.find { _1.name == variant }
   end
 
-  def instantiate(*args)
-    raise "Wrong number of arguments" unless args.size == @params.size
-    hargs = Hash[@params.zip(args)]
-    type = Type.new(@name)
-    @variants.each { type.add_variant(_1.instantiate(hargs)) }
+  def instantiate(args)
+    # hargs = Hash[@params.zip(args)]
+    # type = self.clone #Type.new(@name)
+    args.map! { _1.is_a?(Integer) ? Constant.new(_1) : TypeRef.new(_1) }
+    type = Marshal.load(Marshal.dump(self))
+    type.variants.each { _1.instantiate(args) }
     type
+  end
+
+  def has_variants?
+    @variants.size > 1
+  end
+
+  def verify
+    raise "Empty type is not allowed" if @variants.empty?
+    args_num = @variants[0].params.count
+    raise "Wrong number of arguments" unless @variants.all? { _1.params.count == args_num}
+    if @variants[0].fields.first.is_a?(Constant)
+      raise "All variants must have first field as Constant" unless @variants.all? { _1.fields.first.is_a?(Constant) }
+    end
   end
 
   def dump(indent='', out=$stdout)
@@ -84,15 +101,18 @@ class Type
     @variants.each { _1.dump(indent + '  ', out) }
   end
 end
-
+########################################################################################################################
+# Variant
+#
 class Variant
-  attr_reader :fields, :constraints
+  attr_reader :fields, :constraints, :params
   attr_accessor :type
 
   def initialize
     @fields = []
     @type = ''
     @constraints = {}
+    @params = []
   end
 
   def name
@@ -105,6 +125,10 @@ class Variant
 
   def add_field(field)
     @fields << field
+  end
+
+  def add_param(param)
+    @params << param
   end
 
   def add_constraint(constraint)
@@ -125,8 +149,10 @@ class Variant
   end
 
   def instantiate(args)
+    hargs = Hash[@params.zip(args)]
     @fields.each do |field|
-      field.fix_param_ref
+      field.fix_param_ref(hargs)
+      field.optimize
     end
   end
 
@@ -136,36 +162,28 @@ class Variant
   end
 end
 
+########################################################################################################################
+# Fields
+#
 class Field
-  attr_reader :name
-  attr_accessor :value
+  attr_accessor :name
 
-  def initialize(name, value=nil)
+  def initialize(name)
     @name = name
-    @value = value
   end
 
   def dump(indent='', out=$stdout)
-    out.write("#{indent}field #{@name}: #{value}\n")
+    out.write("#{indent}field #{@name}: #{self.to_s}\n")
   end
 
-  def fix_param_ref(name, value)
-
+  def fix_param_ref(hargs)
   end
 
-  def to_s
-    "#{name}"
+  def optimize
   end
 end
 
-class Value
-
-  def fix_param_ref(name, value)
-  end
-
-end
-
-class Number < Value
+class Number < Field
   attr_reader :bits
 
   def initialize(bits)
@@ -176,12 +194,16 @@ class Number < Value
     end
   end
 
-  def fix_param_ref(name, value)
+  def fix_param_ref(hargs)
     if @bits.is_a?(ParamRef)
-      @bits = value
-    elsif !bits.is_a?(Constant)
-      bits.fix_param_ref(name, value)
+      @bits = hargs[@bits.param]
+      raise "Parameter must be an integer" unless @bits.is_a?(int)
     end
+    @bits.fix_param_ref(hargs)
+  end
+
+  def optimize
+    @bits = @bits.optimize if @bits.is_a?(Expression)
   end
 
   def to_s
@@ -189,7 +211,7 @@ class Number < Value
   end
 end
 
-class Constant < Value
+class Constant < Field
   attr_reader :value, :bits
 
   def initialize(value, bits=nil)
@@ -197,24 +219,34 @@ class Constant < Value
     @bits = bits || value.bit_length
   end
 
+  def ==(other)
+    case
+    when other.is_a?(BitArray)
+      return @value == other.read_int(0, @bits)
+    else
+      raise "Unsupported type: #{other.class}"
+    end
+  end
+
   def to_s
-    "#{@value}"
+    ":#{@value}"
   end
 end
 
-class TypeRef < Value
-  attr_reader :type
+class TypeRef < Field
+  attr_reader :type, :cell_ref
 
-  def initialize(type)
+  def initialize(type, cell_ref)
     @type = type
+    @cell_ref = cell_ref
   end
 
   def to_s
-    "TypeRef to #{@type.name}"
+    "TypeRef<#{@type.name}>"
   end
 end
 
-class FieldRef < Value
+class FieldRef < Field
   attr_reader :field
 
   def initialize(field)
@@ -226,7 +258,7 @@ class FieldRef < Value
   end
 end
 
-class ParamRef < Value
+class ParamRef < Field
   attr_reader :param
 
   def initialize(param)
@@ -236,43 +268,83 @@ class ParamRef < Value
   def to_s
     "&#{@param}"
   end
+
+  def fix_param_ref(hargs)
+    raise "fix_param_ref must not reach ParamRef object"
+  end
 end
 
-class FieldExpression < Value
-  attr_accessor :args
+class Expression < Field
+  attr_accessor :args, :oper
 
-  def initialize(head, args = [])
-    # unless head.is_a?(TypeRef) || head.is_a?(FieldRef) || head.is_a?(Constant)
+  def initialize(oper, args=[])
+    # unless oper.is_a?(TypeRef) || oper.is_a?(FieldRef) || oper.is_a?(Constant)
     #   raise "Must be on of: TypeRef, FieldRef, Constant"
     # end
-    @head = head
+    @oper = oper
     @args = args
   end
 
+  def type_ref?
+    @oper.is_a?(TypeRef)
+  end
+
+  def arith?
+    @oper.is_a?(ArithOperation)
+  end
+
+  def fix_operands_order
+    oper_idx = @args.find_index { _1.is_a?(ArithOperation) }
+    if oper_idx
+      raise "Invalid experssion" if arith?
+      @oper, @args[oper_idx] = @args[oper_idx], @oper
+    end
+  end
+
   def optimize
-    if @head.is_a?(Constant) && @args.size == 2 && @args[0].is_a?(ArithOperation) && @args[1].is_a?(Constant)
-      return Constant.new(@args[0].eval(@head.value, @args[1].value))
-    elsif @head.is_a?(TypeRef) && @head.type.primitive?
+    if arith? && @args.size == 2 && @args[0].is_a?(Constant) && @args[1].is_a?(Constant)
+      return Constant.new(@oper.eval(@args[0].value, @args[1].value))
+    elsif type_ref? && @oper.type.primitive?
       raise "Expected one parameter for primitive type" unless @args.size == 1
       return Number.new(@args[0])
+    elsif arith? && @oper.conditional? && @args[0].is_a?(Constant)
+      value = @args[0].value
+      value -= 1 if @oper.op == :lt
+      return Constant.new(value.bit_length)
     end
     self
   end
 
-  def fix_param_ref(name, value)
-
+  def fix_param_ref(hargs)
+    if @oper.is_a?(ParamRef)
+      @oper = hargs[@oper.param]
+    else
+      @oper.fix_param_ref(hargs)
+    end
+    @args.map! do |arg|
+      if arg.is_a?(ParamRef)
+        new_arg = hargs[arg.param]
+        raise "Wrong ParamRef: #{arg.param}" unless new_arg
+        new_arg
+      else
+        @oper.fix_param_ref(hargs)
+        arg
+      end
+    end
   end
 
   def to_s
-    "(#{@head} #{@args.map(&:to_s).join(' ')})"
+    "(#{@oper} #{@args.map(&:to_s).join(' ')})"
   end
 end
 
-class ArithOperation < Value
+class ArithOperation < Field
 
-  OPERATIONS = [:add, :sub, :mul, :div]
-  OPER_TO_NAME_MAP = {'+'=>:add, '-'=>:sub, '*'=>:mul, '/'=>:div}
-  NAME_TO_OPER_MAP = {add: '+', sub: '-', mul: '*', div: '/'}
+  attr_reader :op
+
+  OPERATIONS = [:add, :sub, :mul, :div, :lt, :le]
+  OPER_TO_NAME_MAP = {'+'=>:add, '-'=>:sub, '*'=>:mul, '/'=>:div, '<'=>:lt, '<='=>:le}
+  NAME_TO_OPER_MAP = {add: '+', sub: '-', mul: '*', div: '/', lt: '<', le: '<='}
 
   def initialize(op)
     if op.is_a?(String)
@@ -288,11 +360,18 @@ class ArithOperation < Value
     a.send(NAME_TO_OPER_MAP[@op], b)
   end
 
+  def conditional?
+    @op == :lt || @op == :le
+  end
+
   def to_s
     "#{NAME_TO_OPER_MAP[@op]}"
   end
 end
 
+########################################################################################################################
+# Constraints
+#
 class Constraint
   attr_reader :name
 
@@ -306,7 +385,6 @@ class TypeConstraint < Constraint
   def initialize(name, type)
     super(name)
     @type = type
-    puts self
   end
 
   def to_s
@@ -330,7 +408,6 @@ class NumberConstraint < Constraint
     super(name)
     @condition = condition
     @value = value
-    puts self
   end
 
   def string_to_condition(condition)

@@ -52,6 +52,7 @@ class Parser
     end
     @variant.type = read_type()
     @variant.type.add_variant(@variant)
+    @variant.type.verify
     @variant
   end
 
@@ -69,15 +70,17 @@ class Parser
       value = read_token(' ', newline_is_error: true)
       return nil if value == '_'
       bits = value.size
-      value = value.to_i
+      value = value.to_i(2)
     when ' '
       raise "Expected '_' constructor, but got '#{name}'" unless name == '_'
       advance_pos
       return nil
     end
 
-    puts "New constructor: name=#{name}, value=#{value}, bits=#{bits}"
-    Field.new(name, Constant.new(value, bits))
+    # puts "New constructor: name=#{name}, value=#{value}, bits=#{bits}"
+    res = Constant.new(value, bits)
+    res.name = name
+    res
   end
 
   def read_constraint
@@ -99,10 +102,10 @@ class Parser
     skip_chars(" \n")
     raise "Unexpected EOF" if eof?
     name = read_token(':')
-    puts "New field: #{name}"
-    field = Field.new(name)
+    # puts "New field: #{name}"
     advance_pos
-    field.value = read_field_expr()
+    field = read_field_expr()
+    field.name = name
     field
   end
 
@@ -122,6 +125,9 @@ class Parser
 
   def read_field_expr
     skip_spaces
+    is_ref = current_char == '^'
+    advance_pos if is_ref
+
     if current_char != '('
       token = read_token(' )')
       if m = /(uint|bits)(\d+)/.match(token)
@@ -133,22 +139,24 @@ class Parser
         return value
       end
       return Number.new(32) if token == '#'
-      return TypeRef.new(@tlb.get_type(token))
+      return TypeRef.new(@tlb.get_type(token), is_ref)
     end
     advance_pos
     token = read_token(' ')
     case token
     when '##'
       skip_spaces
-      bits = read_token(')', move_after_char: true)
-      return Number.new(bits.to_i)
+      token = read_token(')', move_after_char: true)
+      bits = try_integer(token)
+      bits ||= ParamRef.new(token)
+      return Number.new(bits)
     when '#<'
       skip_spaces
       token = read_token(')', move_after_char: true)
       if bits = try_integer(token)
         bits = (bits.to_i - 1).bit_length()
       else
-        bits = FieldExpression.new(NumberConstraint.new(nil, '<', ParamRef.new(token)))
+        bits = Expression.new(ArithOperation.new('<'), [ParamRef.new(token)])
       end
       return Number.new(bits)
     when '#<='
@@ -160,10 +168,10 @@ class Parser
     #   Number.new(const)
     end
 
-    head = try_constant(token)
-    head ||= @variant.create_field_ref(token)
-    head ||= TypeRef.new(@tlb.get_type(token))
-    field = FieldExpression.new(head)
+    oper = try_constant(token)
+    oper ||= @variant.create_field_ref(token)
+    oper ||= TypeRef.new(@tlb.get_type(token), is_ref)
+    field = Expression.new(oper)
 
     while true do
       skip_spaces
@@ -172,6 +180,7 @@ class Parser
     end
     advance_pos
 
+    field.fix_operands_order
     field.optimize
   end
 
@@ -196,11 +205,10 @@ class Parser
       while true do
         skip_spaces
         param = read_token(' ;', newline_is_error: true)
-        type.add_param(param)
+        @variant.add_param(param)
         break if current_char == ';' || eof?
       end
     end
-
     advance_pos
     type
   end
