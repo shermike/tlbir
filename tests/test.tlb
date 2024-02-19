@@ -1,0 +1,87 @@
+unit$_ = Unit;
+true$_ = True;
+// EMPTY False;
+bool_false$0 = Bool;
+bool_true$1 = Bool;
+bool_false$0 = BoolFalse;
+bool_true$1 = BoolTrue;
+nothing$0 {X:Type} = Maybe X;
+just$1 {X:Type} value:X = Maybe X;
+left$0 {X:Type} {Y:Type} value:X = Either X Y;
+right$1 {X:Type} {Y:Type} value:Y = Either X Y;
+pair$_ {X:Type} {Y:Type} first:X second:Y = Both X Y;
+
+bit$_ (## 1) = Bit;
+
+_ _:True = HashmapE;
+
+//
+// TON BLOCK LAYOUT
+//
+addr_none$00 = MsgAddressExt;
+addr_extern$01 len:(## 9) external_address:(bits len)
+             = MsgAddressExt;
+anycast_info$_ depth:(#<= 30) { depth >= 1 }
+   rewrite_pfx:(bits depth) = Anycast;
+addr_std$10 anycast:(Maybe Anycast)
+   workchain_id:int8 address:bits256  = MsgAddressInt;
+addr_var$11 anycast:(Maybe Anycast) addr_len:(## 9)
+   workchain_id:int32 address:(bits addr_len) = MsgAddressInt;
+_ _:MsgAddressInt = MsgAddress;
+_ _:MsgAddressExt = MsgAddress;
+//
+var_uint$_ {n:#} len:(#< n) value:(uint (len * 8))
+         = VarUInteger n;
+var_int$_ {n:#} len:(#< n) value:(int (len * 8))
+        = VarInteger n;
+nanograms$_ amount:(VarUInteger 16) = Grams;
+//
+extra_currencies$_ dict:(HashmapE 32 (VarUInteger 32))
+                 = ExtraCurrencyCollection;
+currencies$_ grams:Grams other:ExtraCurrencyCollection
+           = CurrencyCollection;
+//
+int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
+  src:MsgAddressInt dest:MsgAddressInt
+  value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
+  created_lt:uint64 created_at:uint32 = CommonMsgInfo;
+ext_in_msg_info$10 src:MsgAddressExt dest:MsgAddressInt
+  import_fee:Grams = CommonMsgInfo;
+ext_out_msg_info$11 src:MsgAddressInt dest:MsgAddressExt
+  created_lt:uint64 created_at:uint32 = CommonMsgInfo;
+
+int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
+  src:MsgAddress dest:MsgAddressInt
+  value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
+  created_lt:uint64 created_at:uint32 = CommonMsgInfoRelaxed;
+ext_out_msg_info$11 src:MsgAddress dest:MsgAddressExt
+  created_lt:uint64 created_at:uint32 = CommonMsgInfoRelaxed;
+
+tick_tock$_ tick:Bool tock:Bool = TickTock;
+
+_ split_depth:(Maybe (## 5)) special:(Maybe TickTock)
+  code:(Maybe ^Cell) data:(Maybe ^Cell)
+  library:(HashmapE 256 SimpleLib) = StateInit;
+
+simple_lib$_ public:Bool root:^Cell = SimpleLib;
+
+message$_ {X:Type} info:CommonMsgInfo
+  init:(Maybe (Either StateInit ^StateInit))
+  body:(Either X ^X) = Message X;
+
+message$_ {X:Type} info:CommonMsgInfoRelaxed
+  init:(Maybe (Either StateInit ^StateInit))
+  body:(Either X ^X) = MessageRelaxed X;
+
+_ (Message Any) = MessageAny;
+
+//
+interm_addr_regular$0 use_dest_bits:(#<= 96)
+  = IntermediateAddress;
+interm_addr_simple$10 workchain_id:int8 addr_pfx:uint64
+  = IntermediateAddress;
+interm_addr_ext$11 workchain_id:int32 addr_pfx:uint64
+  = IntermediateAddress;
+msg_envelope#4 cur_addr:IntermediateAddress
+  next_addr:IntermediateAddress fwd_fee_remaining:Grams
+  msg:^(Message Any) = MsgEnvelope;

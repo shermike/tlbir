@@ -132,13 +132,26 @@ class ParserTest < Test::Unit::TestCase
     s = %q(
       a$01 c:(## 9) = X;
       b$11 d:(## 12) = X;
-      _ x:^X = Ref1;
+      _ tmp:(## 4) x:^X = Ref1;
     )
     tlb = Parser.new.parse(s)
     ref1 = tlb['Ref1']
-    assert_equal(ref1.variants[0].fields.count, 1)
-    assert_equal(ref1[0]['x'].class, TypeRef)
-    assert_true(ref1[0]['x'].cell_ref)
+    # assert_equal(ref1.variants[0].fields.count, 1)
+    # assert_equal(ref1[0]['x'].class, TypeRef)
+    # assert_true(ref1[0]['x'].cell_ref)
+
+    # Decode
+    boc = Cell.build {
+      uint4 1
+      ref {
+        uint2  0b01
+        uint9  0x123
+      }
+    }.serialize_boc
+
+    decoder = Decoder.new(tlb, Cell.deserialize_boc(boc))
+    data = decoder.decode(tlb['Ref1'])
+    assert_equal(data, {tmp: 1, x: {cons: 'a', c: 0x123}})
   end
 
   def test_cell_ref_2
@@ -165,7 +178,8 @@ class ParserTest < Test::Unit::TestCase
     var = tlb['Test'].variants[0]
     assert_equal(var.fields.count, 2)
     assert_equal(var.fields[0].class, Number)
-    assert_equal(var.fields[1].class, TypeRef)
+    assert_equal(var.fields[1].class, Expression)
+    assert_true(var.fields[1].type_ref?)
 
     # Decoding 'a'
     boc = Cell.build {
@@ -215,6 +229,76 @@ class ParserTest < Test::Unit::TestCase
     assert_true(var['x'].type_ref?)
     assert_equal(var['x'].oper.type['a']['c'].bits.class, ParamRef)
     assert_equal(var['x'].oper.type['b']['d'].bits.class, ParamRef)
+  end
+
+  def test_maybe
+    s = %q(
+      nothing$0 {T:Type} = Maybe T;
+      just$1 {T:Type} value:T = Maybe T;
+      _ a:# = Bar;
+      _ x:(Maybe Bar) = X;
+      _ x:(Maybe ^Bar) = Y;
+    )
+    tlb = Parser.new.parse(s)
+    tlb.dump
+
+    # Decoding
+    boc = Cell.build {
+      uint1  1
+      uint32 0x12345678
+    }.serialize_boc
+
+    decoder = Decoder.new(tlb, Cell.deserialize_boc(boc))
+    data = decoder.decode(tlb['X'])
+    assert_equal(data, {x: {cons: 'just', value: {a: 0x12345678}}})
+
+    boc = Cell.build {
+      uint1  1
+      ref {
+        uint32 0x12345678
+      }
+    }.serialize_boc
+
+    decoder = Decoder.new(tlb, Cell.deserialize_boc(boc))
+    data = decoder.decode(tlb['Y'])
+    assert_equal(data, {x: {cons: 'just', value: {a: 0x12345678}}})
+
+    boc = Cell.build {
+      uint1  0
+    }.serialize_boc
+
+    decoder = Decoder.new(tlb, Cell.deserialize_boc(boc))
+    data = decoder.decode(tlb['Y'])
+    assert_equal(data, {x: {cons: 'nothing'}})
+  end
+
+  def test_comments
+    s = %q(
+      _ a:# = Bar; // Comment 1
+      _ x:Bar = X;
+      // Comment 2
+      _ x:# = Y;// Comment 3
+    )
+    tlb = Parser.new.parse(s)
+    assert_equal(tlb['Y'][0].fields.count, 1)
+    assert_equal(tlb['X'][0]['x'].class, TypeRef)
+    assert_equal(tlb['Bar'][0]['a'].class, Number)
+  end
+
+  def test_temp
+    s = %q(
+      true$_ = True;
+      _ _:True = HashmapE;
+
+    )
+    tlb = Parser.new.parse(s)
+    # assert_equal(tlb.types.count, 1)
+  end
+
+  def test_tlb_file
+    puts __dir__
+    tlb = Parser.new.parse(File.read("#{__dir__}/confic_contract_abi.tlb"))
+    tlb.dump
   end
 
 end

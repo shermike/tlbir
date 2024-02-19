@@ -1,0 +1,4 @@
+_ len:# boc:(uint (len * 8)) = dictionary;
+
+_ query_id:(## 64) vset:dictionary = set_next_validator_set;
+_ query_id:(## 64) expire_at:# is_critical:(## 1) = register_voting_proposal;

@@ -7,11 +7,18 @@ class Tlb
     @types = {}
   end
 
-  def get_type(type_name)
+  def get_type(type_name, assert=true)
     return Type.new(type_name) if Type::PRIMITIVE_TYPES.include?(type_name)
     type = @types[type_name]
-    raise "Undefined type: #{type_name}" unless type
+    raise "Undefined type: #{type_name}" if assert && !type
     type
+  end
+
+  def try_create_type_ref(type_name, is_ref)
+    raise "Must not be a primitive type" if Type::PRIMITIVE_TYPES.include?(type_name)
+    type = @types[type_name]
+    puts "try_create_type_ref: #{type}"
+    type ? TypeRef.new(type, is_ref) : nil
   end
 
   def add_type(type_name, type)
@@ -33,11 +40,11 @@ class Tlb
     @types.each do |_, type|
       out.write("  type: #{type.name} #{type.variants[0].params.map(&:to_s).join(' ')}\n")
       type.variants.each do |variant|
-        variant.constraints.each do |constraint|
-          out.write("    {#{constraint}}")
-        end
-        out.write("\n") unless variant.constraints.empty?
-        max_len = variant.fields.map(&:name).max_by(&:size).size
+        # variant.constraints.each do |constraint|
+        #   out.write("    {#{constraint}}")
+        # end
+        # out.write("\n") unless variant.constraints.empty?
+        max_len = variant.fields.map(&:name).max_by(&:size)&.size || 0
         prefix = '    - '
         variant.fields.each do |field|
           out.write("#{prefix}#{field.name.ljust(max_len)} : #{field}\n")
@@ -62,6 +69,7 @@ class Type
   end
 
   def add_variant(variant)
+    variant.finalize
     @variants << variant
   end
 
@@ -75,9 +83,8 @@ class Type
   end
 
   def instantiate(args)
-    # hargs = Hash[@params.zip(args)]
-    # type = self.clone #Type.new(@name)
-    args.map! { _1.is_a?(Integer) ? Constant.new(_1) : TypeRef.new(_1) }
+    return self if @variants[0].params.count == 0
+    args.map! { _1.is_a?(Integer) ? Constant.new(_1) : _1 }
     type = Marshal.load(Marshal.dump(self))
     type.variants.each { _1.instantiate(args) }
     type
@@ -113,6 +120,7 @@ class Variant
     @type = ''
     @constraints = {}
     @params = []
+    @maybe_params = []
   end
 
   def name
@@ -144,16 +152,38 @@ class Variant
     FieldRef.new(field)
   end
 
+  def add_maybe_param_ref(name)
+    @maybe_params << ParamRef.new(name)
+    @maybe_params.last
+  end
+
+  def finalize
+    @maybe_params.each do |param|
+      unless @params.include?(param.param)
+        puts 'aaaaa'
+      end
+      raise "Not a param: #{param.class}" unless @params.include?(param.param)
+    end
+  end
+
   def [](field)
     find_field(field)
   end
 
   def instantiate(args)
     hargs = Hash[@params.zip(args)]
-    @fields.each do |field|
-      field.fix_param_ref(hargs)
-      field.optimize
+    @fields.each_with_index do |field, i|
+      if field.is_a?(ParamRef)
+        resolved = hargs[field.param]
+        resolved.name = field.name
+        raise "Invalid param" unless resolved
+        @fields[i] = resolved
+      else
+        field.fix_param_ref(hargs)
+        field.optimize
+      end
     end
+    @params = []
   end
 
   def dump(indent='', out=$stdout)
@@ -241,8 +271,12 @@ class TypeRef < Field
     @cell_ref = cell_ref
   end
 
+  def ref?
+    @cell_ref
+  end
+
   def to_s
-    "TypeRef<#{@type.name}>"
+    @cell_ref ? '^' + @type.name : @type.name
   end
 end
 

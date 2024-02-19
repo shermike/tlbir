@@ -11,7 +11,7 @@ class Parser
     @variant = nil
     @pos = 0
     @types = {}
-    @line = 0
+    @line = 1
   end
 
   def parse_file(filename)
@@ -23,11 +23,13 @@ class Parser
 
     @tlb = Tlb.new
 
-    while !eof? do
-      variant = read_definition()
-      # type = @tlb.get_or_create_type(variant.type_name)
-      # type.add_variant(variant)
-      skip_chars(" \n")
+    begin
+      while !eof? do
+        read_definition()
+      end
+    rescue => e
+      raise e.exception("Error at #{@line} line: #{e}")
+      # raise "Error at #{@line} line: #{e}"
     end
 
     @tlb
@@ -39,6 +41,7 @@ class Parser
     if ctor = read_constructor()
       @variant.add_field(ctor)
     end
+    return if eof?
     while true do
       skip_chars(" \n")
       case current_char
@@ -53,12 +56,13 @@ class Parser
     @variant.type = read_type()
     @variant.type.add_variant(@variant)
     @variant.type.verify
-    @variant
   end
 
   def read_constructor
     name = read_token('#$ ', newline_is_error: true)
+    return nil if eof?
     bits = value = nil
+    puts "New variant: #{name}"
     case current_char()
     when '#'
       advance_pos
@@ -77,7 +81,7 @@ class Parser
       return nil
     end
 
-    # puts "New constructor: name=#{name}, value=#{value}, bits=#{bits}"
+    puts "Constructor: name=#{name}, value=#{value}, bits=#{bits}"
     res = Constant.new(value, bits)
     res.name = name
     res
@@ -139,7 +143,10 @@ class Parser
         return value
       end
       return Number.new(32) if token == '#'
-      return TypeRef.new(@tlb.get_type(token), is_ref)
+      field = @tlb.try_create_type_ref(token, is_ref)
+      field ||= @variant.add_maybe_param_ref(token)
+      # return Expression.new(field)
+      return field
     end
     advance_pos
     token = read_token(' ')
@@ -227,7 +234,7 @@ class Parser
 
   def skip_chars(chars)
     while @pos < @data.size && chars.include?(current_char)
-      @line += 1 if current_char == '\n'
+      next_line if current_char == "\n"
       @pos += 1
     end
   end
@@ -255,14 +262,27 @@ class Parser
   def read_token(until_chars, newline_is_error: false, move_after_char: false)
     stop_chars = until_chars + "\n"
     res = ''
-    while @pos < @data.size && !stop_chars.include?(current_char)
-      @line += 1 if current_char == '\n'
+    while !eof? && !stop_chars.include?(current_char)
+      if @data[@pos] == '/' && @data[@pos + 1] == '/'
+        skip_chars('/')
+        raise "Wrong comment" unless res.empty?
+        read_token('', move_after_char: true)
+        skip_spaces
+        next
+      end
       res += current_char
       @pos += 1
     end
     raise "Read until failed - newline appeared before chars: #{until_chars}" if newline_is_error && current_char == "\n"
+
     @pos += 1 if move_after_char
-    @line += 1 if current_char == '\n'
+    next_line if current_char == "\n"
+    puts "Read token #{res}"
     res
+  end
+
+  def next_line
+    @line += 1
+    puts "LINE: #{@line}"
   end
 end

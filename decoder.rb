@@ -41,30 +41,58 @@ class Decoder
     @pos += bits
   end
 
-  def decode(type)
+  def decode(type, args=[])
+    type = type.instantiate(args)
     if type.has_variants?
       variant = type.variants.find { _1.constructor.value == @cell.data.bits.read_int(@pos, _1.constructor.bits) }
       raise "No variants found" unless variant
       @current[:cons] = variant.name
       @pos += variant.constructor.bits
+      fields = variant.fields[1..-1]
     else
       variant = type.variants.first
+      fields = variant.fields
     end
     raise "No variants match" unless variant
 
-    variant.fields.each do |field|
+    fields.each do |field|
       case
       when field.is_a?(Number)
         assign_number(field)
       when field.is_a?(TypeRef)
-        old = @current
-        @current[field.name.to_sym] = {}
-        @current = @current[field.name.to_sym]
-        decode(field.type)
-        @current = old
+        handle_type_ref(field)
+      when field.is_a?(Expression)
+        if field.type_ref?
+          type = field.oper.type.instantiate(field.args)
+          type_ref = TypeRef.new(type, field.oper.cell_ref)
+          type_ref.name = field.name
+          handle_type_ref(type_ref)
+        # elsif field.oper.
+        end
+      else
+        raise "Unexpected field type: #{field.class}"
       end
     end
     @result
+  end
+
+  def handle_type_ref(field)
+    if field.ref?
+      old_cell = @cell
+      old_pos = @pos
+      @cell = @cell.pop_cell
+      @pos = 0
+    end
+
+    old = @current
+    @current[field.name.to_sym] = {}
+    @current = @current[field.name.to_sym]
+    decode(field.type)
+    @current = old
+    if field.ref?
+      @cell = old_cell
+      @pos = old_pos
+    end
   end
 
   def resolve_field(field)

@@ -136,6 +136,14 @@ class Builder
     @root
   end
 
+  def ref(&block)
+    old_cell = @current
+    cell = Cell.new
+    @current.refs << @current = cell
+    self.instance_eval(&block)
+    @current = old_cell
+  end
+
   def method_missing(method, *args)
     case
     when method.start_with?('uint')
@@ -171,6 +179,12 @@ class Cell
       max_level = k.level if k.level > max_level
     end
     max_level
+  end
+
+  def pop_cell
+    res = @refs.first
+    @refs = @refs[1..-1]
+    res
   end
 
   def special?
