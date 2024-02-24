@@ -1,57 +1,38 @@
-unit$_ = Unit;
-true$_ = True;
-// EMPTY False;
-bool_false$0 = Bool;
-bool_true$1 = Bool;
-bool_false$0 = BoolFalse;
-bool_true$1 = BoolTrue;
-nothing$0 {X:Type} = Maybe X;
-just$1 {X:Type} value:X = Maybe X;
-left$0 {X:Type} {Y:Type} value:X = Either X Y;
-right$1 {X:Type} {Y:Type} value:Y = Either X Y;
-pair$_ {X:Type} {Y:Type} first:X second:Y = Both X Y;
 
-bit$_ (## 1) = Bit;
-
-_ _:True = HashmapE;
-
-//
-// TON BLOCK LAYOUT
-//
 addr_none$00 = MsgAddressExt;
-addr_extern$01 len:(## 9) external_address:(bits len)
+addr_extern$01 len:(## 9) external_address:(bits len) 
              = MsgAddressExt;
 anycast_info$_ depth:(#<= 30) { depth >= 1 }
    rewrite_pfx:(bits depth) = Anycast;
-addr_std$10 anycast:(Maybe Anycast)
+addr_std$10 anycast:(Maybe Anycast) 
    workchain_id:int8 address:bits256  = MsgAddressInt;
-addr_var$11 anycast:(Maybe Anycast) addr_len:(## 9)
+addr_var$11 anycast:(Maybe Anycast) addr_len:(## 9) 
    workchain_id:int32 address:(bits addr_len) = MsgAddressInt;
 _ _:MsgAddressInt = MsgAddress;
 _ _:MsgAddressExt = MsgAddress;
 //
 var_uint$_ {n:#} len:(#< n) value:(uint (len * 8))
          = VarUInteger n;
-var_int$_ {n:#} len:(#< n) value:(int (len * 8))
+var_int$_ {n:#} len:(#< n) value:(int (len * 8)) 
         = VarInteger n;
-nanograms$_ amount:(VarUInteger 16) = Grams;
+nanograms$_ amount:(VarUInteger 16) = Grams;  
 //
-extra_currencies$_ dict:(HashmapE 32 (VarUInteger 32))
+extra_currencies$_ dict:(HashmapE 32 (VarUInteger 32)) 
                  = ExtraCurrencyCollection;
-currencies$_ grams:Grams other:ExtraCurrencyCollection
+currencies$_ grams:Grams other:ExtraCurrencyCollection 
            = CurrencyCollection;
 //
 int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
-  src:MsgAddressInt dest:MsgAddressInt
+  src:MsgAddressInt dest:MsgAddressInt 
   value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
   created_lt:uint64 created_at:uint32 = CommonMsgInfo;
-ext_in_msg_info$10 src:MsgAddressExt dest:MsgAddressInt
+ext_in_msg_info$10 src:MsgAddressExt dest:MsgAddressInt 
   import_fee:Grams = CommonMsgInfo;
 ext_out_msg_info$11 src:MsgAddressInt dest:MsgAddressExt
   created_lt:uint64 created_at:uint32 = CommonMsgInfo;
 
 int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
-  src:MsgAddress dest:MsgAddressInt
+  src:MsgAddress dest:MsgAddressInt 
   value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
   created_lt:uint64 created_at:uint32 = CommonMsgInfoRelaxed;
 ext_out_msg_info$11 src:MsgAddress dest:MsgAddressExt
@@ -62,7 +43,7 @@ tick_tock$_ tick:Bool tock:Bool = TickTock;
 _ split_depth:(Maybe (## 5)) special:(Maybe TickTock)
   code:(Maybe ^Cell) data:(Maybe ^Cell)
   library:(HashmapE 256 SimpleLib) = StateInit;
-
+  
 simple_lib$_ public:Bool root:^Cell = SimpleLib;
 
 message$_ {X:Type} info:CommonMsgInfo
@@ -72,16 +53,280 @@ message$_ {X:Type} info:CommonMsgInfo
 message$_ {X:Type} info:CommonMsgInfoRelaxed
   init:(Maybe (Either StateInit ^StateInit))
   body:(Either X ^X) = MessageRelaxed X;
-
+  
 _ (Message Any) = MessageAny;
 
 //
-interm_addr_regular$0 use_dest_bits:(#<= 96)
+interm_addr_regular$0 use_dest_bits:(#<= 96) 
   = IntermediateAddress;
-interm_addr_simple$10 workchain_id:int8 addr_pfx:uint64
+interm_addr_simple$10 workchain_id:int8 addr_pfx:uint64 
   = IntermediateAddress;
 interm_addr_ext$11 workchain_id:int32 addr_pfx:uint64
   = IntermediateAddress;
-msg_envelope#4 cur_addr:IntermediateAddress
-  next_addr:IntermediateAddress fwd_fee_remaining:Grams
+msg_envelope#4 cur_addr:IntermediateAddress 
+  next_addr:IntermediateAddress fwd_fee_remaining:Grams 
   msg:^(Message Any) = MsgEnvelope;
+//
+msg_import_ext$000 msg:^(Message Any) transaction:^Transaction 
+              = InMsg;
+msg_import_ihr$010 msg:^(Message Any) transaction:^Transaction 
+    ihr_fee:Grams proof_created:^Cell = InMsg;
+msg_import_imm$011 in_msg:^MsgEnvelope
+    transaction:^Transaction fwd_fee:Grams = InMsg;
+msg_import_fin$100 in_msg:^MsgEnvelope 
+    transaction:^Transaction fwd_fee:Grams = InMsg;
+msg_import_tr$101  in_msg:^MsgEnvelope out_msg:^MsgEnvelope 
+    transit_fee:Grams = InMsg;
+msg_discard_fin$110 in_msg:^MsgEnvelope transaction_id:uint64 
+    fwd_fee:Grams = InMsg;
+msg_discard_tr$111 in_msg:^MsgEnvelope transaction_id:uint64 
+    fwd_fee:Grams proof_delivered:^Cell = InMsg;
+//
+import_fees$_ fees_collected:Grams 
+  value_imported:CurrencyCollection = ImportFees;
+
+_ (HashmapAugE 256 InMsg ImportFees) = InMsgDescr;
+
+msg_export_ext$000 msg:^(Message Any)
+    transaction:^Transaction = OutMsg;
+msg_export_imm$010 out_msg:^MsgEnvelope 
+    transaction:^Transaction reimport:^InMsg = OutMsg;
+msg_export_new$001 out_msg:^MsgEnvelope 
+    transaction:^Transaction = OutMsg;
+msg_export_tr$011  out_msg:^MsgEnvelope 
+    imported:^InMsg = OutMsg;
+msg_export_deq$1100 out_msg:^MsgEnvelope
+    import_block_lt:uint63 = OutMsg;
+msg_export_deq_short$1101 msg_env_hash:bits256
+    next_workchain:int32 next_addr_pfx:uint64
+    import_block_lt:uint64 = OutMsg;
+msg_export_tr_req$111 out_msg:^MsgEnvelope 
+    imported:^InMsg = OutMsg;
+msg_export_deq_imm$100 out_msg:^MsgEnvelope 
+    reimport:^InMsg = OutMsg;
+
+_ enqueued_lt:uint64 out_msg:^MsgEnvelope = EnqueuedMsg;
+
+_ (HashmapAugE 256 OutMsg CurrencyCollection) = OutMsgDescr;
+
+_ (HashmapAugE 352 EnqueuedMsg uint64) = OutMsgQueue;
+
+processed_upto$_ last_msg_lt:uint64 last_msg_hash:bits256 = ProcessedUpto;
+// key is [ shard:uint64 mc_seqno:uint32 ]  
+_ (HashmapE 96 ProcessedUpto) = ProcessedInfo;
+
+ihr_pending$_ import_lt:uint64 = IhrPendingSince;
+_ (HashmapE 320 IhrPendingSince) = IhrPendingInfo;
+
+_ out_queue:OutMsgQueue proc_info:ProcessedInfo
+  ihr_pending:IhrPendingInfo = OutMsgQueueInfo;
+//
+storage_used$_ cells:(VarUInteger 7) bits:(VarUInteger 7) 
+  public_cells:(VarUInteger 7) = StorageUsed;
+
+storage_used_short$_ cells:(VarUInteger 7) 
+  bits:(VarUInteger 7) = StorageUsedShort;
+
+storage_info$_ used:StorageUsed last_paid:uint32
+              due_payment:(Maybe Grams) = StorageInfo;
+
+account_none$0 = Account;
+account$1 addr:MsgAddressInt storage_stat:StorageInfo
+          storage:AccountStorage = Account;
+
+account_storage$_ last_trans_lt:uint64
+    balance:CurrencyCollection state:AccountState 
+  = AccountStorage;
+
+account_uninit$00 = AccountState;
+account_active$1 _:StateInit = AccountState;
+account_frozen$01 state_hash:bits256 = AccountState;
+
+acc_state_uninit$00 = AccountStatus;
+acc_state_frozen$01 = AccountStatus;
+acc_state_active$10 = AccountStatus;
+acc_state_nonexist$11 = AccountStatus;
+
+
+account_descr$_ account:^Account last_trans_hash:bits256 
+  last_trans_lt:uint64 = ShardAccount;
+
+depth_balance$_ split_depth:(#<= 30) balance:CurrencyCollection = DepthBalanceInfo;
+
+_ (HashmapAugE 256 ShardAccount DepthBalanceInfo) = ShardAccounts;
+
+transaction$0111 account_addr:bits256 lt:uint64 
+  prev_trans_hash:bits256 prev_trans_lt:uint64 now:uint32
+  outmsg_cnt:uint15
+  orig_status:AccountStatus end_status:AccountStatus
+  ^[ in_msg:(Maybe ^(Message Any)) out_msgs:(HashmapE 15 ^(Message Any)) ]
+  total_fees:CurrencyCollection state_update:^(HASH_UPDATE Account)
+  description:^TransactionDescr = Transaction;
+
+!merkle_update#02 {X:Type} old_hash:bits256 new_hash:bits256
+  old:^X new:^X = MERKLE_UPDATE X;
+update_hashes#72 {X:Type} old_hash:bits256 new_hash:bits256
+  = HASH_UPDATE X;
+!merkle_proof#03 {X:Type} virtual_hash:bits256 depth:uint16 virtual_root:^X = MERKLE_PROOF X;
+
+acc_trans#5 account_addr:bits256
+            transactions:(HashmapAug 64 ^Transaction CurrencyCollection)
+            state_update:^(HASH_UPDATE Account)
+          = AccountBlock;
+
+_ (HashmapAugE 256 AccountBlock CurrencyCollection) = ShardAccountBlocks;
+//
+tr_phase_storage$_ storage_fees_collected:Grams 
+  storage_fees_due:(Maybe Grams)
+  status_change:AccStatusChange
+  = TrStoragePhase;
+
+acst_unchanged$0 = AccStatusChange;  // x -> x
+acst_frozen$10 = AccStatusChange;    // init -> frozen
+acst_deleted$11 = AccStatusChange;   // frozen -> deleted
+
+tr_phase_credit$_ due_fees_collected:(Maybe Grams)
+  credit:CurrencyCollection = TrCreditPhase;
+
+tr_phase_compute_skipped$0 reason:ComputeSkipReason
+  = TrComputePhase;
+tr_phase_compute_vm$1 success:Bool msg_state_used:Bool 
+  account_activated:Bool gas_fees:Grams
+  ^[ gas_used:(VarUInteger 7)
+  gas_limit:(VarUInteger 7) gas_credit:(Maybe (VarUInteger 3))
+  mode:int8 exit_code:int32 exit_arg:(Maybe int32)
+  vm_steps:uint32
+  vm_init_state_hash:bits256 vm_final_state_hash:bits256 ]
+  = TrComputePhase;
+cskip_no_state$00 = ComputeSkipReason;
+cskip_bad_state$01 = ComputeSkipReason;
+cskip_no_gas$10 = ComputeSkipReason;
+
+tr_phase_action$_ success:Bool valid:Bool no_funds:Bool
+  status_change:AccStatusChange
+  total_fwd_fees:(Maybe Grams) total_action_fees:(Maybe Grams)
+  result_code:int32 result_arg:(Maybe int32) tot_actions:uint16
+  spec_actions:uint16 skipped_actions:uint16 msgs_created:uint16 
+  action_list_hash:bits256 tot_msg_size:StorageUsedShort 
+  = TrActionPhase;
+
+tr_phase_bounce_negfunds$00 = TrBouncePhase;
+tr_phase_bounce_nofunds$01 msg_size:StorageUsedShort
+  req_fwd_fees:Grams = TrBouncePhase;
+tr_phase_bounce_ok$1 msg_size:StorageUsedShort 
+  msg_fees:Grams fwd_fees:Grams = TrBouncePhase;
+//
+trans_ord$0000 credit_first:Bool
+  storage_ph:(Maybe TrStoragePhase)
+  credit_ph:(Maybe TrCreditPhase)
+  compute_ph:TrComputePhase action:(Maybe ^TrActionPhase)
+  aborted:Bool bounce:(Maybe TrBouncePhase)
+  destroyed:Bool
+  = TransactionDescr;
+
+trans_storage$0001 storage_ph:TrStoragePhase
+  = TransactionDescr;
+
+trans_tick_tock$001 is_tock:Bool storage_ph:TrStoragePhase
+  compute_ph:TrComputePhase action:(Maybe ^TrActionPhase)
+  aborted:Bool destroyed:Bool = TransactionDescr;
+//
+split_merge_info$_ cur_shard_pfx_len:(## 6)
+  acc_split_depth:(## 6) this_addr:bits256 sibling_addr:bits256
+  = SplitMergeInfo;
+trans_split_prepare$0100 split_info:SplitMergeInfo
+  storage_ph:(Maybe TrStoragePhase)
+  compute_ph:TrComputePhase action:(Maybe ^TrActionPhase)
+  aborted:Bool destroyed:Bool
+  = TransactionDescr;
+trans_split_install$0101 split_info:SplitMergeInfo
+  prepare_transaction:^Transaction
+  installed:Bool = TransactionDescr;
+
+trans_merge_prepare$0110 split_info:SplitMergeInfo
+  storage_ph:TrStoragePhase aborted:Bool
+  = TransactionDescr;
+trans_merge_install$0111 split_info:SplitMergeInfo
+  prepare_transaction:^Transaction
+  storage_ph:(Maybe TrStoragePhase)
+  credit_ph:(Maybe TrCreditPhase)
+  compute_ph:TrComputePhase action:(Maybe ^TrActionPhase)
+  aborted:Bool destroyed:Bool
+  = TransactionDescr;
+
+smc_info#076ef1ea actions:uint16 msgs_sent:uint16
+  unixtime:uint32 block_lt:uint64 trans_lt:uint64 
+  rand_seed:bits256 balance_remaining:CurrencyCollection
+  myself:MsgAddressInt = SmartContractInfo;
+//
+//
+out_list_empty$_ = OutList 0;
+out_list$_ {n:#} prev:^(OutList n) action:OutAction
+  = OutList (n + 1);
+action_send_msg#0ec3c86d mode:(## 8) 
+  out_msg:^(MessageRelaxed Any) = OutAction;
+action_set_code#ad4de08e new_code:^Cell = OutAction;
+action_reserve_currency#36e6b809 mode:(## 8)
+  currency:CurrencyCollection = OutAction;
+libref_hash$0 lib_hash:bits256 = LibRef;
+libref_ref$1 library:^Cell = LibRef;
+action_change_library#26fa1dd4 mode:(## 7) { mode <= 2 }
+  libref:LibRef = OutAction;
+
+out_list_node$_ prev:^Cell action:OutAction = OutListNode;
+//
+//
+shard_ident$00 shard_pfx_bits:(#<= 60) 
+  workchain_id:int32 shard_prefix:uint64 = ShardIdent;
+
+ext_blk_ref$_ end_lt:uint64
+  seq_no:uint32 root_hash:bits256 file_hash:bits256 
+  = ExtBlkRef;
+
+block_id_ext$_ shard_id:ShardIdent seq_no:uint32
+  root_hash:bits256 file_hash:bits256 = BlockIdExt;
+
+master_info$_ master:ExtBlkRef = BlkMasterInfo;
+
+shard_state#9023afe2 global_id:int32
+  shard_id:ShardIdent 
+  seq_no:uint32 vert_seq_no:#
+  gen_utime:uint32 gen_lt:uint64
+  min_ref_mc_seqno:uint32
+  out_msg_queue_info:^OutMsgQueueInfo
+  before_split:(## 1)
+  accounts:^ShardAccounts
+  ^[ overload_history:uint64 underload_history:uint64
+  total_balance:CurrencyCollection
+  total_validator_fees:CurrencyCollection
+  libraries:(HashmapE 256 LibDescr)
+  master_ref:(Maybe BlkMasterInfo) ]
+  custom:(Maybe ^McStateExtra)
+  = ShardStateUnsplit;
+  
+_ ShardStateUnsplit = ShardState;
+split_state#5f327da5 left:^ShardStateUnsplit right:^ShardStateUnsplit = ShardState;
+
+shared_lib_descr$00 lib:^Cell publishers:(Hashmap 256 True)
+  = LibDescr;
+
+block_info#9bc7a987 version:uint32 
+  not_master:(## 1) 
+  after_merge:(## 1) before_split:(## 1) 
+  after_split:(## 1) 
+  want_split:Bool want_merge:Bool
+  key_block:Bool vert_seqno_incr:(## 1)
+  flags:(## 8) { flags <= 1 }
+  seq_no:# vert_seq_no:# { vert_seq_no >= vert_seqno_incr } 
+  { prev_seq_no:# } { ~prev_seq_no + 1 = seq_no } 
+  shard:ShardIdent gen_utime:uint32
+  start_lt:uint64 end_lt:uint64
+  gen_validator_list_hash_short:uint32
+  gen_catchain_seqno:uint32
+  min_ref_mc_seqno:uint32
+  prev_key_block_seqno:uint32
+  gen_software:(flags . 0?GlobalVersion)
+  master_ref:not_master?^BlkMasterInfo 
+  prev_ref:^(BlkPrevInfo after_merge)
+  prev_vert_ref:vert_seqno_incr?^(BlkPrevInfo 0)
+  = BlockInfo;

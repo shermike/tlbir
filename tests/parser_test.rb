@@ -296,9 +296,33 @@ class ParserTest < Test::Unit::TestCase
   end
 
   def test_tlb_file
-    puts __dir__
-    tlb = Parser.new.parse(File.read("#{__dir__}/confic_contract_abi.tlb"))
-    tlb.dump
+    require 'spreadsheet'
+
+    book = Spreadsheet::Workbook.new
+
+    book.create_worksheet :name => 'Sheet Name'
+
+    tlb = Parser.new.parse(File.read("#{__dir__}/test.tlb"))
+    #tlb.types.fields.each { puts "#{_1.value}, #{_1.name}" }
+    i = 0
+    tlb.types.each do |name, type|
+      puts "\n=== #{name}"
+      book.worksheet(0).insert_row(i, ['---------------------------------'])
+      book.worksheet(0).insert_row(i + 1, [name])
+      i += 2
+      type.variants.each do |v|
+        puts ">> Variant: #{v.constructor.name}: #{v.constructor.value}" if v.constructor
+        book.worksheet(0).insert_row(i, ['>> variant', v.constructor.name, v.constructor.value]) if v.constructor
+        i += 1
+        v.fields.select{ !_1.nil? }.each do |f|
+          book.worksheet(0).insert_row(i, [f.name, f.value])
+          i += 1
+          # puts "#{f.name}, #{f.value}"
+        end
+      end
+    end
+    #tlb.dump
+    book.write('/tmp/test.xls')
   end
 
 end
